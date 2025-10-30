@@ -1,21 +1,671 @@
 <!DOCTYPE html>
-<html>
-    <head>
-        <meta charset="utf-8">
-        <title>原子项目组-时光仓</title>
-    </head>
-    <body>
-        <h1>
-            欢迎来到时光仓！
-        </h1>
-        <p>
-            This website is based on github and it is used only for personal purpose.
-            <br> 
-            <em>最新消息:时光仓项目正式开始运行 -20230526</em>
-            <br>
-            upload address:<a href="https://github.com/star-picker/atomxtimemachine">上传链接UploadLink</a>
-            <address>
-            Written by <a href="mailto:m416royalhero@126.com">starpicker</a>
-        </address>
-    </body>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>W-8BEN 表格填写助手 (用户上传版)</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 pdf-lib 用于处理 PDF。 此脚本会在全局创建 'PDFLib' 对象 -->
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <style>
+        /* 自定义样式和字体 */
+        body { font-family: "Inter", sans-serif; background-color: #f7fafc; }
+        #signature-canvas {
+            border: 2px solid #e2e8f0;
+            border-radius: 0.5rem;
+            cursor: crosshair;
+            background-color: #ffffff;
+            /* 确保签名画布尺寸固定，以便在 PDF 中准确定位 */
+            width: 400px;
+            height: 150px;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="app" class="max-w-4xl mx-auto bg-white shadow-2xl rounded-xl p-6 md:p-10 border border-gray-100">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">W-8BEN 表格填写助手</h1>
+        <p class="text-gray-500 mb-8">填写以下信息，生成最终的 W-8BEN PDF 文件。请确保所有日期格式为 MM-DD-YYYY。<a href="https://github.com/star-picker">GitHub@star-picker</a> 2025</p>
+        <p><a href="https://github.com/user-attachments/files/23235582/W8BEN.pdf">点击下载空白模板W8BEN.pdf</a></p>
+
+        <!-- 进度条 -->
+        <div class="mb-8">
+            <div id="progress-bar-container" class="w-full bg-gray-200 rounded-full h-2.5">
+                <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <p id="step-title" class="text-center mt-2 text-indigo-700 font-medium"></p>
+        </div>
+        
+        <!-- 表单内容区域 -->
+        <div id="form-content">
+            <!-- 步骤内容将在此处渲染 -->
+        </div>
+
+        <!-- 导航按钮 -->
+        <div class="flex justify-between mt-8 pt-4 border-t">
+            <button id="prev-btn" onclick="prevStep()" class="px-6 py-2 bg-gray-300 text-gray-700 font-semibold rounded-lg shadow-md hover:bg-gray-400 transition-colors" style="display: none;">
+                上一步
+            </button>
+            <button id="next-btn" onclick="nextStep()" class="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition-colors">
+                下一步
+            </button>
+        </div>
+
+        <!-- 模态框/提示框 -->
+        <div id="modal-backdrop" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center transition-opacity z-50">
+            <div id="modal-content" class="bg-white rounded-xl shadow-2xl p-6 w-11/12 md:max-w-md">
+                <h3 id="modal-title" class="text-xl font-semibold text-gray-800 mb-4">提示</h3>
+                <p id="modal-message" class="text-gray-600 mb-6"></p>
+                <div class="flex justify-end">
+                    <button onclick="closeModal()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                        确定
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 加载指示器 -->
+        <div id="loading-spinner" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center transition-opacity z-50">
+            <div class="flex flex-col items-center p-6 bg-white rounded-xl shadow-2xl">
+                <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
+                <p class="text-indigo-600 font-semibold">正在生成 PDF 文件...</p>
+            </div>
+        </div>
+        <style>
+            .loader {
+                border-top-color: #3b82f6;
+                -webkit-animation: spinner 1.5s linear infinite;
+                animation: spinner 1.5s linear infinite;
+            }
+            @-webkit-keyframes spinner {
+                0% { -webkit-transform: rotate(0deg); }
+                100% { -webkit-transform: rotate(360deg); }
+            }
+            @keyframes spinner {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    </div>
+
+    <!-- 引入 SignaturePad 用于电子签名 (已移至此处，确保在主脚本前加载) -->
+    <script src="https://unpkg.com/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+
+    <script>
+        // 全局状态管理
+        let signaturePad = null;
+        let currentStep = 0; // 0: Start, 1: Part I, 2: Part II, 3: Part III, 4: Review/Generate
+        const totalSteps = 5;
+
+        // 表单数据，用于存储所有输入
+        const formData = {
+            '姓名': '',
+            '公民身份国家': '',
+            '居住地址': '', // Line 3a
+            '城市_省份_邮编': '', // Line 3b
+            '国家': '', // Line 3c
+            '税号': '', // U.S. TIN (Line 5)
+            '税号_外国': '', // Foreign TIN (Line 6a)
+            'FTIN非必需': false, // Line 6b Checkbox
+            '出生日期': '',
+            '国籍': '', // Treaty Country
+            '条约条款': '',
+            '税率': '',
+            '收入类型': '',
+            '理由': '',
+            '签署人姓名_打印': '',
+            '签署日期': '',
+            '签名图片': '', // Base64 签名图片
+            '原始PDF': null // 新增：存储用户上传的 PDF 文件的 ArrayBuffer
+        };
+
+        // 步骤定义 (Step 0 的内容将在 renderStep 中动态生成)
+        const steps = [
+            {
+                title: "开始 - 上传 PDF 模板",
+                content: '' 
+            },
+            {
+                title: "第一部分 (Part I) - 身份识别",
+                content: `
+                    <div class="space-y-4">
+                        ${renderInput('姓名', 'Line 1: 姓名 (Name of individual)', '如：Sanfeng Zhang')}
+                        ${renderInput('公民身份国家', 'Line 2: 公民身份国家 (Country of citizenship)', '如：China')}
+                        
+                        <!-- 按照要求修改 Line 3a, 3b, 3c 的标签 -->
+                        ${renderInput('居住地址', 'Line 3a: 永久居住地址 (Permanent residence address)', '街道、公寓号或套房号。请勿使用邮政信箱。')}
+                        ${renderInput('城市_省份_邮编', 'Line 3b: 城市、省份、邮编 (City, state/province, postal code)', '城市, 省份/州, 邮编')}
+                        ${renderInput('国家', 'Line 3c: 国家 (Country)', '如：China')}
+                        
+                        <div class="grid md:grid-cols-2 md:gap-4">
+                             <!-- 按照要求修改 Line 6b -> Line 6a -->
+                             ${renderInput('税号_外国', 'Line 6a: 外国税号 (Foreign tax identifying number)', '外国税号，如身份证号、护照号等。')}
+                             <!-- 按照要求修改 Line 6a -> Line 5 -->
+                             ${renderInput('税号', 'Line 5: 美国税号 (U.S. TIN) (可选)', '如无美国税号，请留空。')}
+                        </div>
+                        
+                        <!-- 按照要求修改 FTIN 标签，增加 Line 6b -->
+                        ${renderCheckbox('FTIN非必需', 'Line 6b Check if FTIN not legally required (勾选：外国税号在法律上非必需)')}
+                        
+                        ${renderInput('出生日期', 'Line 8: 出生日期 (Date of birth)', '格式：MM-DD-YYYY (月月-日日-年年年年)', 'text', 'MM-DD-YYYY', 'pattern="\\d{2}-\\d{2}-\\d{4}"')}
+                    </div>
+                `
+            },
+            {
+                title: "第二部分 (Part II) - 协定优惠",
+                content: `
+                    <div class="space-y-4">
+                        <p class="text-base font-semibold text-indigo-700">Part II, Line 10a 将自动勾选，声明受益所有人符合协定条款。</p>
+                        ${renderInput('国籍', 'Line 9: 居住国 (Country of residence for tax purposes)', '请填写您是其税务居民的国家，如：China')}
+                        <h4 class="text-lg font-semibold mt-6 mb-2">Line 10: 声明特定收入的特别税率和条件 (如适用)</h4>
+                        <div class="grid md:grid-cols-3 md:gap-4">
+                             ${renderInput('条约条款', '条款 (Article/Paragraph)', '如：Article 10')}
+                             ${renderInput('税率', '税率 (Rate)', '如：10% 或 0%')}
+                             ${renderInput('收入类型', '收入类型 (Type of income)', '如：Dividends (股息) 或 Interest (利息)')}
+                        </div>
+                        ${renderInput('理由', '理由 (Reason for claiming rate)', '简要说明，如：Article 10, Paragraph 2, subparagraph a applies to reduce withholding to 10%.')}
+                    </div>
+                `
+            },
+            {
+                title: "第三部分 (Part III) - 电子签名",
+                content: `
+                    <div class="space-y-4">
+                        <p class="text-lg font-semibold text-gray-700">Part III: 声明与认证 (Certification)</p>
+                        ${renderInput('签署人姓名_打印', '打印签署人姓名 (Print name of signer)', '请打印您在 Line 1 填写的姓名')}
+                        ${renderInput('签署日期', '签署日期 (Date)', '格式：MM-DD-YYYY (月月-日日-年年年年)', 'text', 'MM-DD-YYYY', 'pattern="\\d{2}-\\d{2}-\\d{4}"')}
+
+                        <label class="block text-sm font-medium text-gray-700 mt-4">电子签名 (Signature of beneficial owner) <span class="text-sm text-gray-500">(可选)</span></label>
+                        <canvas id="signature-canvas" class="mt-1" width="400" height="150"></canvas>
+                        <button onclick="clearSignature()" class="mt-2 px-4 py-2 text-sm bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-colors">清除签名</button>
+                    </div>
+                `
+            },
+            {
+                title: "完成与生成",
+                content: `
+                    <div class="space-y-4">
+                        <h2 class="text-2xl font-semibold text-green-600">恭喜！表格已填写完毕。</h2>
+                        <p class="text-base text-gray-700">请仔细核对您的输入信息。点击下方的 **“生成 PDF”** 按钮，将使用您输入的信息生成最终的 W-8BEN PDF 文件。</p>
+                        <div class="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                            <h3 class="font-bold text-gray-800 mb-2">重要提示：</h3>
+                            <ul class="list-disc list-inside text-sm text-gray-600 space-y-1">
+                                <li>所有信息将以静态文本形式叠加在您上传的原始 PDF 上。</li>
+                                <li>**Part II, Line 10a 将被自动勾选。**</li>
+                                <li>签名图片将被嵌入 PDF 中 (如果已绘制)。</li>
+                            </ul>
+                        </div>
+                        <button onclick="generatePdf()" class="w-full px-6 py-3 bg-green-600 text-white text-lg font-bold rounded-lg shadow-xl hover:bg-green-700 transition-colors mt-6">
+                            生成 PDF
+                        </button>
+                    </div>
+                `
+            }
+        ];
+
+        // --- UI 渲染函数 ---
+
+        function renderInput(key, label, placeholder, type = 'text', hint = '', attributes = '') {
+            return `
+                <div>
+                    <label for="${key}" class="block text-sm font-medium text-gray-700">${label}</label>
+                    <input type="${type}" id="${key}" name="${key}" value="${formData[key]}" oninput="updateFormData('${key}', this.value)"
+                           placeholder="${placeholder}" ${attributes}
+                           class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900">
+                    ${hint ? `<p class="mt-1 text-xs text-gray-500">${hint}</p>` : ''}
+                </div>
+            `;
+        }
+        
+        // 渲染复选框的函数
+        function renderCheckbox(key, label) {
+            return `
+                <div class="flex items-center">
+                    <input type="checkbox" id="${key}" name="${key}" ${formData[key] ? 'checked' : ''} onchange="updateFormData('${key}', this.checked)"
+                           class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                    <label for="${key}" class="ml-2 block text-sm font-medium text-gray-700">${label}</label>
+                </div>
+            `;
+        }
+        
+        // --- 文件处理函数 ---
+
+        function handlePdfUpload(event) {
+            const file = event.target.files[0];
+            const statusElement = document.getElementById('pdf-status');
+
+            if (!file) {
+                formData['原始PDF'] = null;
+                statusElement.textContent = '❌ 请上传 PDF 文件以继续。';
+                statusElement.className = 'mt-2 text-sm font-medium text-red-600';
+                return;
+            }
+
+            if (file.type !== 'application/pdf') {
+                openModal('请确保您上传的是 PDF 文件。', '文件错误');
+                formData['原始PDF'] = null;
+                statusElement.textContent = '❌ 文件类型不正确，请上传 PDF 文件。';
+                statusElement.className = 'mt-2 text-sm font-medium text-red-600';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // 将文件内容存储为 ArrayBuffer
+                formData['原始PDF'] = e.target.result;
+                statusElement.textContent = '✅ 原始 PDF 文件已加载。';
+                statusElement.className = 'mt-2 text-sm font-medium text-green-600';
+            };
+            reader.onerror = function() {
+                openModal('读取文件时发生错误。', '文件错误');
+                formData['原始PDF'] = null;
+                statusElement.textContent = '❌ 读取文件失败。';
+                statusElement.className = 'mt-2 text-sm font-medium text-red-600';
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function renderStep() {
+            const progressBar = document.getElementById('progress-bar');
+            progressBar.style.width = `${((currentStep) / (totalSteps - 1)) * 100}%`;
+
+            // 动态生成 Step 0 的内容，以确保状态更新
+            if (currentStep === 0) {
+                const status = formData['原始PDF'] ? 
+                    { text: '✅ 原始 PDF 文件已加载。', class: 'text-green-600' } : 
+                    { text: '❌ 请上传 PDF 文件以继续。', class: 'text-red-600' };
+
+                steps[0].content = `
+                    <div class="space-y-4">
+                        <p class="text-lg">欢迎使用 W-8BEN 填写工具。本工具将引导您完成 W-8BEN 表格的必要部分，最终生成 PDF 文件。</p>
+                        <p class="text-lg font-semibold text-red-600">注意：请先上传您要填写的 W-8BEN PDF 模板文件 (建议使用最新 Rev. 10-2021 版本)。</p>
+                        
+                        <!-- PDF 上传区域 -->
+                        <label for="pdf-upload" class="block text-sm font-medium text-gray-700">1. 上传原始 W-8BEN PDF 文件</label>
+                        <input type="file" id="pdf-upload" accept="application/pdf" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" onchange="handlePdfUpload(event)">
+                        <p id="pdf-status" class="mt-2 text-sm font-medium ${status.class}">
+                            ${status.text}
+                        </p>
+                        
+                        <p class="text-sm text-gray-500">点击“下一步”开始填写 Part I - 身份识别信息。</p>
+                    </div>
+                `;
+            }
+
+            const step = steps[currentStep];
+            document.getElementById('step-title').textContent = step.title;
+            document.getElementById('form-content').innerHTML = step.content;
+
+
+            // 按钮状态控制
+            document.getElementById('prev-btn').style.display = currentStep > 0 && currentStep < totalSteps - 1 ? 'block' : 'none';
+            document.getElementById('next-btn').textContent = currentStep === totalSteps - 1 ? '完成' : '下一步';
+            document.getElementById('next-btn').disabled = currentStep === totalSteps - 1; // 禁用“下一步”直到 PDF 生成
+
+            if (currentStep === totalSteps - 1) {
+                // 最后一页，按钮显示为“生成 PDF”
+                document.getElementById('next-btn').style.display = 'none';
+            } else {
+                document.getElementById('next-btn').style.display = 'block';
+            }
+            
+            // 签名板初始化
+            if (currentStep === 3) {
+                const canvas = document.getElementById('signature-canvas');
+                // 检查 SignaturePad 是否已加载
+                if (typeof SignaturePad !== 'undefined') {
+                    // 签名背景改为纯透明
+                    signaturePad = new SignaturePad(canvas, {
+                        backgroundColor: 'rgba(0, 0, 0, 0)'
+                    });
+                    
+                    // 加载已有签名 (如果存在)
+                    if (formData['签名图片']) {
+                        signaturePad.fromDataURL(formData['签名图片']);
+                    }
+
+                    // 确保 canvas 尺寸在加载时正确设置
+                    const resizeCanvas = () => {
+                        // Set the canvas size based on the hardcoded CSS values or container
+                        const ratio =  Math.max(window.devicePixelRatio || 1, 1);
+                        canvas.width = 400 * ratio;
+                        canvas.height = 150 * ratio;
+                        canvas.getContext("2d").scale(ratio, ratio);
+                        if (formData['签名图片']) {
+                            // 重新设置比例后需要重新加载签名
+                            signaturePad.fromDataURL(formData['签名图片']);
+                        } else {
+                            signaturePad.clear();
+                        }
+                    }
+
+                    window.addEventListener('resize', resizeCanvas);
+                    resizeCanvas();
+                } else {
+                    console.error("SignaturePad library is not loaded.");
+                }
+            }
+        }
+
+        // --- 数据和导航逻辑 ---
+
+        function updateFormData(key, value) {
+            // 对于复选框，值是布尔类型
+            if (key === 'FTIN非必需') {
+                formData[key] = value;
+            } else {
+                formData[key] = value;
+            }
+        }
+
+        function updateSignatureData() {
+            if (signaturePad && !signaturePad.isEmpty()) {
+                formData['签名图片'] = signaturePad.toDataURL("image/png");
+            } else {
+                formData['签名图片'] = '';
+            }
+        }
+
+        function clearSignature() {
+            if (signaturePad) {
+                signaturePad.clear();
+                formData['签名图片'] = '';
+            }
+        }
+
+        function nextStep() {
+            // 验证当前步骤的数据
+
+            // Step 0 验证：确保 PDF 已上传
+            if (currentStep === 0) {
+                if (!formData['原始PDF']) {
+                    openModal('请先上传 W-8BEN PDF 模板文件才能继续填写。');
+                    return;
+                }
+            }
+
+            if (currentStep === 1) {
+                // 检查必填字段
+                const requiredFields = [
+                    { key: '姓名', label: 'Line 1 姓名' },
+                    { key: '公民身份国家', label: 'Line 2 公民身份国家' },
+                    { key: '居住地址', label: 'Line 3a 永久居住地址' },
+                    { key: '城市_省份_邮编', label: 'Line 3b 城市、省份、邮编' },
+                    { key: '国家', label: 'Line 3c 国家' },
+                    { key: '出生日期', label: 'Line 8 出生日期' }
+                ];
+
+                for (const field of requiredFields) {
+                    if (!formData[field.key]) {
+                        openModal(`请填写必填字段：${field.label}。`);
+                        return;
+                    }
+                }
+                
+                // 检查外国税号 (Line 6a)
+                // 仅当 FTIN *不是* 非必需时，才检查 Line 6a 是否填写
+                if (!formData['FTIN非必需'] && !formData['税号_外国']) {
+                    openModal(`请填写 Line 6a 外国税号，或勾选 Line 6b 的“外国税号在法律上非必需”复选框。`);
+                    return;
+                }
+                
+                // 检查日期格式
+                if (!/^(\d{2}-\d{2}-\d{4})?$/.test(formData['出生日期'])) {
+                    openModal('出生日期格式必须是 MM-DD-YYYY (月月-日日-年年年年)。');
+                    return;
+                }
+            }
+            if (currentStep === 2) {
+                if (!formData['国籍']) {
+                    openModal('请填写 Line 9 居住国。');
+                    return;
+                }
+            }
+            if (currentStep === 3) {
+                updateSignatureData(); // 捕获签名数据
+
+                if (!formData['签署人姓名_打印'] || !formData['签署日期'] || !/^(\d{2}-\d{2}-\d{4})?$/.test(formData['签署日期'])) {
+                    openModal('请填写签署人姓名，并确保签署日期格式为 MM-DD-YYYY。');
+                    return;
+                }
+            }
+
+            if (currentStep < totalSteps - 1) {
+                currentStep++;
+                renderStep();
+            } else if (currentStep === totalSteps - 1) {
+                // 最终页面的“完成”按钮应触发 PDF 生成
+                generatePdf();
+            }
+        }
+
+        function prevStep() {
+            if (currentStep > 0) {
+                currentStep--;
+                renderStep();
+            }
+        }
+
+        // --- PDF 生成逻辑 (已修改为使用上传数据) ---
+        async function generatePdf() {
+            showLoading(); // 显示加载指示器
+
+            if (typeof PDFLib === 'undefined') {
+                hideLoading();
+                openModal('PDF 库 (pdf-lib) 未能加载成功。请检查您的网络连接或尝试刷新页面。', '错误：PDFLib 未定义', 'error');
+                return;
+            }
+
+            if (!formData['原始PDF']) {
+                hideLoading();
+                openModal('未检测到原始 PDF 文件。请返回第一步并上传 W-8BEN 模板文件。', '错误');
+                return;
+            }
+
+            try {
+                // 1. 使用用户上传的 ArrayBuffer 来加载 PDF
+                const existingPdfBytes = formData['原始PDF']; 
+                const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+                
+                // 2. 获取第一页并准备字体
+                const page = pdfDoc.getPages()[0];
+                const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                const fontSize = 9;
+
+                // 3. 准备签名图片
+                let signaturePdfImage = null;
+                const signatureImage = formData['签名图片'];
+
+                if (signatureImage) {
+                    signaturePdfImage = await pdfDoc.embedPng(signatureImage);
+                }
+
+                // 4. 定义字段及其在 PDF 上的坐标 (基于 W-8BEN (Rev. 10-2021) 估算 - 已校正)
+                const fields = [
+                    // Part I - Identification
+                    // Line 1: Name
+                    { key: '姓名', x: 65, y: 544, w: 270, align: 'left' }, 
+                    // Line 2: Country of citizenship
+                    { key: '公民身份国家', x: 396, y: 544, w: 280, align: 'left' }, 
+                    // Line 3a: Permanent residence address
+                    { key: '居住地址', x: 65, y: 521, w: 570, align: 'left' }, 
+                    // Line 3b: City, state/province, postal code
+                    { key: '城市_省份_邮编', x: 65, y: 495, w: 570, align: 'left' }, 
+                    // Line 3c: Country
+                    { key: '国家', x: 446, y: 495, w: 570, align: 'left' }, 
+                    
+                    // Line 5: U.S. TIN (if provided)
+                    { key: '税号', x: 65, y: 425, w: 270, align: 'left' }, // 对应 Line 5
+                    // Line 6a: Foreign TIN
+                    { key: '税号_外国', x: 65, y: 400, w: 270, align: 'left' }, // 对应 Line 6a
+
+                    // Line 8: Date of birth (MM-DD-YYYY)
+                    { key: '出生日期', x: 315, y: 375, w: 280, align: 'left' }, 
+                    
+                    // Part II - Claiming Treaty Benefits
+                    // Line 9: Treaty Country
+                    { key: '国籍', x: 240, y: 350, w: 380, align: 'left' },
+
+                    // Line 10: Special rates and conditions
+                    // Article/Paragraph
+                    { key: '条约条款', x: 65, y: 315, w: 100, align: 'left' }, 
+                    // Rate
+                    { key: '税率', x: 355, y: 315, w: 40, align: 'left' }, 
+                    // Type of income
+                    { key: '收入类型', x: 65, y: 302, w: 500, align: 'left' }, 
+                    // Reason
+                    { key: '理由', x: 65, y: 277, w: 570, align: 'left' }, 
+                ];
+                
+                // 5. 绘制文本字段
+                for (const field of fields) {
+                    const text = formData[field.key] || '';
+                    if (text) {
+                        page.drawText(text, {
+                            x: field.x,
+                            y: field.y,
+                            size: fontSize,
+                            font: font,
+                            color: PDFLib.rgb(0, 0, 0),
+                        });
+                    }
+                }
+
+                // 6. MANDATORY: 自动勾选 Part II, Line 10a
+                // 估算坐标：Line 10a 对应的复选框 (已校正)
+                const checkboxX = 562; 
+                const checkboxY = 407; // 位于 Line 9 和 Line 10 之间
+                const checkSize = 14;
+                
+                // 7. Line 6b - FTIN not legally required 复选框
+                if (formData['FTIN非必需']) {
+                    const ftinCheckboxX = 563; // 估算 Line 6b 右侧复选框 X 坐标
+                    const ftinCheckboxY = 408; // 估算 Line 6b 右侧复选框 Y 坐标
+                    const ftinCheckSize = 14; 
+                    
+                    page.drawText('X', {
+                        x: ftinCheckboxX,
+                        y: ftinCheckboxY,
+                        size: ftinCheckSize,
+                        font: font,
+                        color: PDFLib.rgb(0, 0, 0),
+                    });
+                }
+
+                // 8. Part III - 认证 (签名和日期)
+                
+                // 打印签署人姓名 (Part III, Line 1) (已校正)
+                const printedName = formData['签署人姓名_打印'] || '';
+                page.drawText(printedName, {
+                    x: 350, // 校正位置
+                    y: 73, // 校正位置
+                    size: fontSize,
+                    font: font,
+                    color: PDFLib.rgb(0, 0, 0),
+                });
+
+                // 签署日期 (Part III, Line 2) (已校正)
+                const signDate = formData['签署日期'] || '';
+                page.drawText(signDate, {
+                    x: 445, // 校正位置
+                    y: 73, // 校正位置
+                    size: fontSize,
+                    font: font,
+                    color: PDFLib.rgb(0, 0, 0),
+                });
+                
+                // 9. 绘制签名图片 (签名是可选的，只有存在时才绘制)
+                if (signaturePdfImage) {
+                    // 用户要求：左下角坐标 (x, y): (140, 74)，高度: 40，宽度: 等比例
+
+                    const desiredHeight = 40;
+                    const desiredY = 74; // 左下角 Y 坐标
+
+                    // 计算等比例缩放后的宽度
+                    const originalWidth = signaturePdfImage.width;
+                    const originalHeight = signaturePdfImage.height;
+                    const desiredWidth = (originalWidth / originalHeight) * desiredHeight;
+                    
+                    // PDF-lib 的 drawImage() 函数使用左下角坐标 (x, y)
+                    page.drawImage(signaturePdfImage, {
+                        x: 140, // 用户指定的左下角 X 坐标
+                        y: desiredY, // 用户指定的左下角 Y 坐标
+                        width: desiredWidth, // 保持比例计算出的宽度
+                        height: desiredHeight, // 用户指定的高度
+                    });
+                }
+
+                // 10. 保存并下载
+                const pdfBytes = await pdfDoc.save();
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'W-8BEN_Completed.pdf';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                openModal('PDF 文件已生成并开始下载：W-8BEN_Completed.pdf', '成功', 'success');
+
+            } catch (error) {
+                console.error('PDF 生成失败:', error);
+                // 捕获 try 块内的其他错误，如文件损坏等
+                openModal('PDF 生成过程中发生错误，请检查控制台获取详情。错误信息：' + error.message, '错误', 'error');
+            } finally {
+                hideLoading(); // 隐藏加载指示器
+            }
+        }
+        
+        // --- 模态框和加载指示器函数 ---
+
+        function openModal(message, title = '提示', type = 'info') {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            
+            const titleElement = document.getElementById('modal-title');
+            titleElement.className = 'text-xl font-semibold mb-4 ' + (
+                type === 'error' ? 'text-red-600' :
+                type === 'success' ? 'text-green-600' :
+                'text-gray-800'
+            );
+
+            document.getElementById('modal-backdrop').classList.remove('hidden');
+            document.getElementById('modal-backdrop').classList.add('flex');
+        }
+
+        function closeModal() {
+            document.getElementById('modal-backdrop').classList.add('hidden');
+            document.getElementById('modal-backdrop').classList.remove('flex');
+        }
+
+        function showLoading() {
+            document.getElementById('loading-spinner').classList.remove('hidden');
+            document.getElementById('loading-spinner').classList.add('flex');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-spinner').classList.add('hidden');
+            document.getElementById('loading-spinner').classList.remove('flex');
+        }
+
+        // 首次启动
+        window.onload = () => {
+            renderStep();
+        };
+
+        // 将功能暴露给全局
+        window.clearSignature = clearSignature;
+        window.nextStep = nextStep;
+        window.prevStep = prevStep;
+        window.generatePdf = generatePdf;
+        window.openModal = openModal;
+        window.closeModal = closeModal;
+        window.handlePdfUpload = handlePdfUpload; // 暴露新的文件上传处理函数
+    </script>
+</body>
 </html>
+

@@ -1,6 +1,24 @@
 {
- "generated_at": "2026-11-20T13:17:25.494665+00:00",
+ "generated_at": "2026-11-20T13:31:17.530567+00:00",
  "notes": [
+  {
+   "id": "2026-11-21-after-nand-dump",
+   "title": {
+    "zh": "NAND dump 之后先做三件事",
+    "en": "Three checks after a NAND dump"
+   },
+   "summary": {
+    "zh": "拿到整片 dump 不要急着分析，先确认页结构、可重复性和坏块标记。",
+    "en": "Before analyzing a raw NAND dump, verify page structure, reproducibility and bad-block markers."
+   },
+   "date": "2026-11-21",
+   "tags": [
+    "nand",
+    "validation",
+    "debugging"
+   ],
+   "html": "<h2>1. 页结构对不对</h2>\n<p>确认每页是 <code>2048 + OOB</code> 还是 <code>2048</code> 裸数据。OOB 里通常有 ECC 校验和坏块标记：</p>\n<ul>\n<li>坏块标记一般是 OOB 第一个字节不是 <code>0xFF</code>；</li>\n<li>有些控制器会把 ECC 写进 OOB，读回时应能通过简单校验；</li>\n<li>全 <code>0xFF</code> 的页多半是未编程或擦除块。</li>\n</ul>\n<h2>2. 可重复性</h2>\n<p>同一片区域读两次，逐页比对：</p>\n<pre><code class=\"language-python\">a = open('dump_a.bin','rb').read()\nb = open('dump_b.bin','rb').read()\nbad = [i for i in range(0, len(a), 2112) if a[i:i+2112] != b[i:i+2112]]\nprint('differing pages:', len(bad))\n</code></pre>\n<p>不一致就说明读取链路（传输/USB/时序）不稳，先修链路再看内容。</p>\n<h2>3. 关键区域能定位</h2>\n<p>在 dump 里搜你关心的字符串/魔数，确认能找到对应文件或注册表值：</p>\n<ul>\n<li>FAT 卷：目录项是 UTF-16 文件名；</li>\n<li>注册表 hive：值数据前有 cell 长度；</li>\n<li>可执行文件：<code>MZ</code> 头 + 对齐偏移。</li>\n</ul>\n<p>三件事都过了，再开始动写操作。</p>"
+  },
   {
    "id": "2026-11-20-nand-via-emulator",
    "title": {

@@ -135,7 +135,7 @@
   be.addEventListener('click',function(){setLang('en')});
   try{var saved=localStorage.getItem('lang'); if(saved==='en'||saved==='zh') setLang(saved)}catch(e){}
 
-  var HIDDEN={'star-picker':1,'star-picker.github.io':1,'bla':1,'cardpass-releases':1};
+  var HIDDEN_IDS={521916587:1,521920146:1,1445440013:1,1426547926:1}; // filtered by id, not name
   var grid=document.getElementById('grid');
   var year=document.getElementById('year'); if(year) year.textContent=new Date().getFullYear();
 
@@ -151,7 +151,7 @@
   fetch('https://api.github.com/users/star-picker/repos?per_page=100&sort=updated',{headers:{'Accept':'application/vnd.github+json'}})
     .then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json()})
     .then(function(list){
-      var repos=list.filter(function(r){return !r.fork && !HIDDEN[r.name]});
+      var repos=list.filter(function(r){return !r.fork && !HIDDEN_IDS[r.id]});
       repos.sort(function(a,b){return new Date(b.pushed_at)-new Date(a.pushed_at)});
       grid.innerHTML = repos.length? repos.map(card).join('') :
         '<div class="card"><p>No public repositories.</p></div>';

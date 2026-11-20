@@ -1,0 +1,41 @@
+{
+ "generated_at": "2026-11-20T13:17:25.494665+00:00",
+ "notes": [
+  {
+   "id": "2026-11-20-nand-via-emulator",
+   "title": {
+    "zh": "用硬件仿真器读取 NAND",
+    "en": "Reading NAND through a hardware emulator"
+   },
+   "summary": {
+    "zh": "不拆焊、不开机，通过 SoC 恢复模式加载一个极小的裸机 payload，把整片 NAND 读回主机。",
+    "en": "Load a tiny bare-metal payload through the SoC recovery mode and stream the whole NAND to a host, without desoldering."
+   },
+   "date": "2026-11-20",
+   "tags": [
+    "nand",
+    "reverse-engineering",
+    "bootloader"
+   ],
+   "html": "<h2>思路</h2>\n<p>很多 i.MX23/28 类 SoC 的 ROM 恢复模式会暴露一个 USB Vendor 接口，允许主机下载一段代码到 SRAM 并执行。\n利用这一点，可以把一个几百行的 payload 塞进 SRAM，由它去编程 NAND 控制器，主机只负责：</p>\n<ol>\n<li>通过恢复模式上传 hwemul（或等价加载器），拿回一个可读写内存的调试通道；</li>\n<li>把 payload 写到 SRAM 的固定地址；</li>\n<li>在约定地址写控制块（magic/op/row/len），然后 CALL payload 入口；</li>\n<li>payload 轮询完成标志，主机从数据缓冲把页读走。</li>\n</ol>\n<h2>关键细节</h2>\n<ul>\n<li>一次内存写不要超过 192 字节，超出会 STALL；</li>\n<li>页大小按 raw 2112 字节（2048 数据 + 64 OOB）处理，保留 OOB 便于后续分析；</li>\n<li>读回失败优先怀疑传输层，其次才是 NAND 时序；</li>\n<li>每次写 NAND 前必须备份目标块，并做回读校验。</li>\n</ul>\n<pre><code class=\"language-text\">payload 0x10000..0x13FFF (取决于加载器)\ncontrol 0x7F00  magic + op + row + len\ndata    0x6000  2112 bytes\n</code></pre>\n<h2>经验</h2>\n<p>先做只读冒烟（16 页），确认整套链路通了再跑全片；中断后能用起始页续跑，避免重头再来。</p>"
+  },
+  {
+   "id": "2026-11-18-wince-boot-path",
+   "title": {
+    "zh": "WinCE 启动路径与外壳替换",
+    "en": "WinCE boot path and shell replacement"
+   },
+   "summary": {
+    "zh": "记录 WinCE 设备启动项在注册表/启动清单中的形态，以及等长替换外壳路径的思路。",
+    "en": "How the boot path is stored on a WinCE device, and how to replace the shell path with an equal-length patch."
+   },
+   "date": "2026-11-18",
+   "tags": [
+    "windows-ce",
+    "registry",
+    "boot"
+   ],
+   "html": "<h2>启动链路</h2>\n<p>典型 WinCE 设备由 bootloader 加载 NK，然后由 <code>AutoStart</code>/启动清单拉起厂商外壳程序。\n启动项本质是注册表里的一个字符串值（或启动清单文件里的一行），指向 <code>\\\\NANDFlash\\\\...\\\\xxx.exe</code>。</p>\n<h2>等长替换</h2>\n<ul>\n<li>目标字符串通常按 UTF-16 存储，前后有 cell/长度字段；</li>\n<li>替换时<strong>必须保持长度一致</strong>，剩余字节用 <code>0x00</code> 填充，不能改动长度字段；</li>\n<li>替换前先整块备份，替换后回读校验；</li>\n<li>路径长度不够时，优先换个更短的落点，而不是改结构。</li>\n</ul>\n<h2>注意</h2>\n<p>不同批次设备的块号/偏移不同，<strong>不要复用另一台机器的地址</strong>，每次都要在 dump 里现场定位。</p>"
+  }
+ ]
+}
